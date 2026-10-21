@@ -87,8 +87,15 @@ class DolbyRepository(private val context: Context) : AutoCloseable {
         }
     }
 
+    fun getSavedDolbyEnabled(): Boolean {
+        return defaultPrefs.getBoolean(
+            DolbyConstants.PREF_ENABLE,
+            context.resources.getBoolean(R.bool.config_dolby_default_enabled)
+        )
+    }
+
     private fun restoreSavedState(): Boolean {
-        dolbyEffect.dsOn = defaultPrefs.getBoolean(DolbyConstants.PREF_ENABLE, false)
+        dolbyEffect.dsOn = getSavedDolbyEnabled()
         return restoreSavedProfileIfNeeded()
     }
 
@@ -148,7 +155,7 @@ class DolbyRepository(private val context: Context) : AutoCloseable {
     fun applySavedState(): Boolean {
         return try {
             if (!checkEffect()) return false
-            val enabled = defaultPrefs.getBoolean(DolbyConstants.PREF_ENABLE, false)
+            val enabled = getSavedDolbyEnabled()
             dolbyEffect.dsOn = enabled
             !enabled || restoreSavedProfileIfNeeded()
         } catch (e: Exception) {
