@@ -11,7 +11,6 @@ import androidx.lifecycle.viewModelScope
 import org.lunaris.dolby.DolbyConstants
 import org.lunaris.dolby.data.DolbyRepository
 import org.lunaris.dolby.domain.models.*
-import org.lunaris.dolby.service.DolbyEffectService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
@@ -52,7 +51,9 @@ class DolbyViewModel(application: Application) : AndroidViewModel(application) {
     private fun observeProfileChanges() {
         profileChangeJob?.cancel()
         profileChangeJob = viewModelScope.launch {
-            repository.currentProfile.collect {
+            combine(repository.currentProfile, repository.enabled) { profile, enabled ->
+                profile to enabled
+            }.collect {
                 if (!isCleared) {
                     DolbyConstants.dlog(TAG, "Profile changed to: $it")
                     loadSettings()
@@ -116,11 +117,6 @@ class DolbyViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.setDolbyEnabled(enabled)
-                if (enabled) {
-                    DolbyEffectService.start(getApplication())
-                } else {
-                    DolbyEffectService.stop(getApplication())
-                }
                 loadSettings()
             } catch (e: Exception) {
                 DolbyConstants.dlog(TAG, "Error setting Dolby enabled: ${e.message}")

@@ -15,6 +15,7 @@ import android.media.AudioManager
 import org.lunaris.dolby.DolbyConstants
 import org.lunaris.dolby.DolbyConstants.DsParam
 import org.lunaris.dolby.R
+import org.lunaris.dolby.service.DolbyEffectService
 import org.lunaris.dolby.audio.DolbyAudioEffect
 import org.lunaris.dolby.domain.models.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,6 +38,14 @@ class DolbyRepository(private val context: Context) : AutoCloseable {
     
     private val _currentProfile = MutableStateFlow(0)
     val currentProfile: StateFlow<Int> = _currentProfile.asStateFlow()
+    private val _enabled = MutableStateFlow(getSavedDolbyEnabled())
+    val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
+    private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        when (key) {
+            DolbyConstants.PREF_ENABLE -> _enabled.value = getSavedDolbyEnabled()
+            DolbyConstants.PREF_PROFILE -> readSavedProfile()?.let { _currentProfile.value = it }
+        }
+    }
 
     val stereoWideningSupported = context.resources.getBoolean(R.bool.dolby_stereo_widening_supported)
     val volumeLevelerSupported = context.resources.getBoolean(R.bool.dolby_volume_leveler_supported)
@@ -49,6 +58,8 @@ class DolbyRepository(private val context: Context) : AutoCloseable {
     init {
         try {
             DolbyEffectHolder.acquire()
+            _currentProfile.value = getCurrentProfile()
+            defaultPrefs.registerOnSharedPreferenceChangeListener(preferenceListener)
         } catch (e: Exception) {
             DolbyConstants.dlog(TAG, "Failed to create Dolby effect: ${e.message}")
             throw e
@@ -199,6 +210,11 @@ class DolbyRepository(private val context: Context) : AutoCloseable {
             if (!checkEffect()) return
             dolbyEffect.dsOn = enabled
             defaultPrefs.edit().putBoolean(DolbyConstants.PREF_ENABLE, enabled).apply()
+            if (enabled) {
+                DolbyEffectService.start(context.applicationContext)
+            } else {
+                DolbyEffectService.stop(context.applicationContext)
+            }
         } catch (e: Exception) {
             DolbyConstants.dlog(TAG, "Error setting Dolby enabled: ${e.message}")
         }
@@ -943,6 +959,7 @@ class DolbyRepository(private val context: Context) : AutoCloseable {
         if (!isReleased) {
             DolbyConstants.dlog(TAG, "Releasing repository resources")
             isReleased = true
+            defaultPrefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
             try {
                 DolbyEffectHolder.release()
             } catch (e: Exception) {
