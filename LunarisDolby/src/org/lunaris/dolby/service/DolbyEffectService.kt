@@ -36,6 +36,7 @@ class DolbyEffectService : Service() {
     private var applyRetryAttempt = 0
     private var applyRetryPending = false
     private var destroyed = false
+    private var deviceChangePendingAfterCall = false
     private val applyRetry = Runnable {
         applyRetryPending = false
         applySavedStateOrRetry()
@@ -85,11 +86,26 @@ class DolbyEffectService : Service() {
     private val playbackCallback = object : AudioManager.AudioPlaybackCallback() {
         override fun onPlaybackConfigChanged(configs: MutableList<AudioPlaybackConfiguration>?) {
             val isActive = configs?.any { it.isActive } == true
-            if (isActive) {
+            if (isActive && !isInCall()) {
                 applySavedStateOrRetry()
             }
         }
     }
+
+    // The DAP effect is a global (session 0) output effect. Retuning it while
+    // AudioFlinger switches the route of a live call (e.g. speaker on) races
+    // with the call path, so device changes are deferred until the call ends.
+    private val modeListener = AudioManager.OnModeChangedListener { mode ->
+        if (!isCallMode(mode) && deviceChangePendingAfterCall) {
+            deviceChangePendingAfterCall = false
+            handleDeviceChange()
+        }
+    }
+
+    private fun isCallMode(mode: Int): Boolean =
+        mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_IN_COMMUNICATION
+
+    private fun isInCall(): Boolean = isCallMode(audioManager.mode)
 
     override fun onCreate() {
         super.onCreate()
@@ -111,10 +127,16 @@ class DolbyEffectService : Service() {
 
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, handler)
         audioManager.registerAudioPlaybackCallback(playbackCallback, handler)
+        audioManager.addOnModeChangedListener(mainExecutor, modeListener)
         Log.d(TAG, "Dolby effect service created")
     }
 
     private fun handleDeviceChange() {
+        if (isInCall()) {
+            Log.d(TAG, "Device change during call, deferring to call end")
+            deviceChangePendingAfterCall = true
+            return
+        }
         val newDevice = getCurrentOutputDevice()
         val oldDevice = previousActiveDevice
 
@@ -197,6 +219,7 @@ class DolbyEffectService : Service() {
         }
         audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
         audioManager.unregisterAudioPlaybackCallback(playbackCallback)
+        audioManager.removeOnModeChangedListener(modeListener)
         handler.removeCallbacksAndMessages(null)
         repository.close()
         Log.d(TAG, "Dolby effect service destroyed")
