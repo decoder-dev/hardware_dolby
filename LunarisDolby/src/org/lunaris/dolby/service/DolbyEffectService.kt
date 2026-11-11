@@ -37,6 +37,7 @@ class DolbyEffectService : Service() {
     private var applyRetryPending = false
     private var destroyed = false
     private var deviceChangePendingAfterCall = false
+    private var effectUnavailable = false
     private val applyRetry = Runnable {
         applyRetryPending = false
         applySavedStateOrRetry()
@@ -109,7 +110,17 @@ class DolbyEffectService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        repository = DolbyRepository(this)
+        // Without the DAP effect in the audio HAL (e.g. no effect library for
+        // the HAL's ABI) creating the effect throws. Crashing here makes the
+        // system restart the service in a tight loop, so stop instead.
+        repository = try {
+            DolbyRepository(this)
+        } catch (e: RuntimeException) {
+            Log.e(TAG, "Dolby effect is not available, stopping", e)
+            effectUnavailable = true
+            stopSelf()
+            return
+        }
         deviceStateManager = DeviceStateManager(this)
         val currentDevice = getCurrentOutputDevice()
         if (currentDevice != null) {
@@ -203,6 +214,10 @@ class DolbyEffectService : Service() {
         "name=$productName,type=$type,id=$id,address=$address,isSink=$isSink"
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (effectUnavailable) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         applySavedStateOrRetry()
         return START_STICKY
     }
@@ -210,6 +225,7 @@ class DolbyEffectService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         destroyed = true
+        if (effectUnavailable) return
         cancelApplyRetry()
         if (isDeviceStateMemoryEnabled) {
             previousActiveDevice?.let { device ->
