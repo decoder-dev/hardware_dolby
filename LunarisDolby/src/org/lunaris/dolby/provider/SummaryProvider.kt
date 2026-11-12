@@ -13,6 +13,8 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
+import io.github.miner7222.dolby.DolbyEffectUnavailableException
 import org.lunaris.dolby.R
 import org.lunaris.dolby.data.DolbyRepository
 
@@ -57,8 +59,13 @@ class SummaryProvider : ContentProvider() {
     private fun getDolbySummary(): String {
         val context = context ?: return ""
         // Close the repository so its reference on the shared effect does not leak.
-        val profile = DolbyRepository(context).use {
-            if (it.getDolbyEnabled()) it.getCurrentProfile() else null
+        val profile = try {
+            DolbyRepository(context).use {
+                if (it.getDolbyEnabled()) it.getCurrentProfile() else null
+            }
+        } catch (e: DolbyEffectUnavailableException) {
+            Log.w("DolbySummaryProvider", "Dolby effect is unavailable", e)
+            return context.getString(R.string.dolby_unavailable)
         } ?: return context.getString(R.string.dolby_off)
         val profiles = context.resources.getStringArray(R.array.dolby_profile_entries)
         val profileValues = context.resources.getStringArray(R.array.dolby_profile_values)

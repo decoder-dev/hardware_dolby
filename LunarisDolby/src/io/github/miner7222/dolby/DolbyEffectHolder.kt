@@ -7,6 +7,9 @@ package io.github.miner7222.dolby
 import android.util.Log
 import org.lunaris.dolby.audio.DolbyAudioEffect
 
+internal class DolbyEffectUnavailableException(cause: RuntimeException) :
+    RuntimeException("Dolby effect is unavailable", cause)
+
 /**
  * Process-wide owner of the DAP effect on audio session 0.
  *
@@ -93,5 +96,10 @@ internal object DolbyEffectHolder {
         restored
     }
 
-    private fun createEffect() = DolbyAudioEffect(EFFECT_PRIORITY, audioSession = 0)
+    private fun createEffect(): DolbyAudioEffect = try {
+        DolbyAudioEffect(EFFECT_PRIORITY, audioSession = 0)
+    } catch (e: RuntimeException) {
+        // Only AudioEffect construction failures are recoverable as an unavailable DAP.
+        throw DolbyEffectUnavailableException(e)
+    }
 }

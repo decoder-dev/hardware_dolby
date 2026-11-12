@@ -9,6 +9,7 @@ import android.content.Intent
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import io.github.miner7222.dolby.DolbyEffectUnavailableException
 import org.lunaris.dolby.DolbyConstants
 import org.lunaris.dolby.data.AppProfileManager
 import org.lunaris.dolby.data.DolbyRepository
@@ -18,18 +19,30 @@ class DolbyNotificationListener : NotificationListenerService() {
     private lateinit var appProfileManager: AppProfileManager
     private lateinit var dolbyRepository: DolbyRepository
     private var lastActivePackage: String? = null
+    private var effectUnavailable = false
 
     override fun onCreate() {
         super.onCreate()
         DolbyConstants.dlog(TAG, "NotificationListener created")
         appProfileManager = AppProfileManager(this)
-        dolbyRepository = DolbyRepository(this)
+        dolbyRepository = try {
+            DolbyRepository(this)
+        } catch (e: DolbyEffectUnavailableException) {
+            Log.w(TAG, "Dolby effect is unavailable, stopping notification listener", e)
+            effectUnavailable = true
+            stopSelf()
+            return
+        }
         initializeDolbySettings()
         startAppProfileMonitoringIfEnabled()
     }
 
     override fun onListenerConnected() {
         super.onListenerConnected()
+        if (effectUnavailable) {
+            requestUnbind()
+            return
+        }
         DolbyConstants.dlog(TAG, "NotificationListener connected")
         initializeDolbySettings()
         startAppProfileMonitoringIfEnabled()
@@ -37,12 +50,14 @@ class DolbyNotificationListener : NotificationListenerService() {
 
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
+        if (effectUnavailable) return
         DolbyConstants.dlog(TAG, "NotificationListener disconnected")
         requestRebind(android.content.ComponentName(this, DolbyNotificationListener::class.java))
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         super.onNotificationPosted(sbn)
+        if (effectUnavailable) return
         sbn?.packageName?.let { packageName ->
             if (packageName != lastActivePackage && packageName != this.packageName) {
                 lastActivePackage = packageName
@@ -95,7 +110,7 @@ class DolbyNotificationListener : NotificationListenerService() {
 
     override fun onDestroy() {
         super.onDestroy()
-        dolbyRepository.close()
+        if (::dolbyRepository.isInitialized) dolbyRepository.close()
         DolbyConstants.dlog(TAG, "NotificationListener destroyed")
     }
 
